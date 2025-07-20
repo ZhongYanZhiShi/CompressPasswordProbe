@@ -46,7 +46,9 @@ class DropArea(QFrame):
         self.setMinimumHeight(100)
 
         layout = QVBoxLayout()
-        self.label = QLabel("拖放压缩文件到此处\n支持格式: ZIP, 7Z, RAR")
+        self.label = QLabel(
+            "拖放压缩文件到此处\n支持格式: ZIP, 7Z, RAR\n支持分卷压缩包"
+        )
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
         self.setLayout(layout)
@@ -282,6 +284,14 @@ class MainWindow(QMainWindow):
         if "error" not in info:
             self.log_message(f"已加载压缩文件: {os.path.basename(file_path)}")
             self.log_message(f"格式: {info.get('format', '未知')}")
+
+            # 分卷压缩包提示
+            if info.get("is_volume", False):
+                self.log_message("检测到分卷压缩包")
+                first_volume = info.get("first_volume", "")
+                if first_volume:
+                    self.log_message(f"第一卷: {os.path.basename(first_volume)}")
+
             self.log_message(f"文件数量: {info.get('file_count', 0)}")
             self.log_message(
                 f"是否加密: {'是' if info.get('has_password', False) else '否'}"

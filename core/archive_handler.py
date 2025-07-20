@@ -3,6 +3,7 @@
 """
 
 import os
+import re
 import zipfile
 import py7zr
 import rarfile
@@ -144,21 +145,94 @@ class ArchiveManager:
         }
         self.supported_formats = list(self.handlers.keys())
 
+        # 分卷压缩包模式
+        self.volume_patterns = {
+            # ZIP分卷模式：.z01, .z02, ..., .z99
+            "zip_volume": re.compile(r"\.z\d{2}$", re.IGNORECASE),
+            # RAR分卷模式1：.r00, .r01, ..., .r99
+            "rar_volume1": re.compile(r"\.r\d{2}$", re.IGNORECASE),
+            # RAR分卷模式2：.part1.rar, .part2.rar, ...
+            "rar_volume2": re.compile(r"\.part\d+\.rar$", re.IGNORECASE),
+            # 7Z分卷模式：.7z.001, .7z.002, ...
+            "7z_volume": re.compile(r"\.7z\.\d{3}$", re.IGNORECASE),
+        }
+
+    def _detect_archive_type(self, file_path: str) -> Optional[str]:
+        """检测压缩文件类型，支持分卷压缩包"""
+        filename = os.path.basename(file_path).lower()
+        ext = os.path.splitext(file_path)[1].lower()
+
+        # 首先检查标准格式
+        if ext in self.supported_formats:
+            return ext
+
+        # 检查分卷格式
+        for pattern_name, pattern in self.volume_patterns.items():
+            if pattern.search(filename):
+                if pattern_name.startswith("zip"):
+                    return ".zip"
+                elif pattern_name.startswith("rar"):
+                    return ".rar"
+                elif pattern_name.startswith("7z"):
+                    return ".7z"
+
+        return None
+
     def get_handler(self, file_path: str) -> Optional[ArchiveHandler]:
         """根据文件扩展名获取对应的处理器"""
-        ext = os.path.splitext(file_path)[1].lower()
-        return self.handlers.get(ext)
+        archive_type = self._detect_archive_type(file_path)
+        return self.handlers.get(archive_type) if archive_type else None
 
     def is_supported(self, file_path: str) -> bool:
         """检查文件格式是否支持"""
-        ext = os.path.splitext(file_path)[1].lower()
-        return ext in self.supported_formats
+        return self._detect_archive_type(file_path) is not None
+
+    def _find_first_volume(self, file_path: str) -> str:
+        """查找分卷压缩包的第一卷"""
+        filename = os.path.basename(file_path)
+        dirname = os.path.dirname(file_path)
+
+        # 对于分卷压缩包，尝试找到第一卷
+        base_name = filename.lower()
+
+        # ZIP分卷：找 .zip 文件
+        if re.search(r"\.z\d{2}$", base_name):
+            zip_name = re.sub(r"\.z\d{2}$", ".zip", base_name)
+            zip_path = os.path.join(dirname, zip_name)
+            if os.path.exists(zip_path):
+                return zip_path
+
+        # RAR分卷模式1：找 .rar 文件
+        elif re.search(r"\.r\d{2}$", base_name):
+            rar_name = re.sub(r"\.r\d{2}$", ".rar", base_name)
+            rar_path = os.path.join(dirname, rar_name)
+            if os.path.exists(rar_path):
+                return rar_path
+
+        # RAR分卷模式2：找 .part1.rar 文件
+        elif re.search(r"\.part\d+\.rar$", base_name):
+            part1_name = re.sub(r"\.part\d+\.rar$", ".part1.rar", base_name)
+            part1_path = os.path.join(dirname, part1_name)
+            if os.path.exists(part1_path):
+                return part1_path
+
+        # 7Z分卷：找 .7z.001 文件
+        elif re.search(r"\.7z\.\d{3}$", base_name):
+            first_name = re.sub(r"\.7z\.\d{3}$", ".7z.001", base_name)
+            first_path = os.path.join(dirname, first_name)
+            if os.path.exists(first_path):
+                return first_path
+
+        # 如果找不到第一卷，返回原文件路径
+        return file_path
 
     def test_password(self, archive_path: str, password: str) -> bool:
         """测试压缩文件密码"""
-        handler = self.get_handler(archive_path)
+        # 对于分卷压缩包，使用第一卷进行测试
+        first_volume_path = self._find_first_volume(archive_path)
+        handler = self.get_handler(first_volume_path)
         if handler:
-            return handler.test_password(archive_path, password)
+            return handler.test_password(first_volume_path, password)
         return False
 
     def get_archive_info(self, archive_path: str) -> dict:
@@ -166,11 +240,23 @@ class ArchiveManager:
         if not os.path.exists(archive_path):
             return {"error": "文件不存在"}
 
-        handler = self.get_handler(archive_path)
+        # 对于分卷压缩包，使用第一卷获取信息
+        first_volume_path = self._find_first_volume(archive_path)
+        handler = self.get_handler(first_volume_path)
         if handler:
-            info = handler.extract_info(archive_path)
-            info["format"] = os.path.splitext(archive_path)[1].lower()
+            info = handler.extract_info(first_volume_path)
+            archive_type = self._detect_archive_type(archive_path)
+            info["format"] = archive_type if archive_type else "未知"
             info["file_size"] = os.path.getsize(archive_path)
+
+            # 如果是分卷压缩包，添加分卷信息
+            if first_volume_path != archive_path:
+                info["is_volume"] = True
+                info["first_volume"] = first_volume_path
+                info["current_volume"] = archive_path
+            else:
+                info["is_volume"] = False
+
             return info
         else:
             return {"error": "不支持的文件格式"}
@@ -178,9 +264,9 @@ class ArchiveManager:
     def get_supported_formats_filter(self) -> str:
         """获取文件对话框的格式过滤器"""
         filters = []
-        filters.append("支持的压缩文件 (*.zip *.7z *.rar)")
-        filters.append("ZIP文件 (*.zip)")
-        filters.append("7Z文件 (*.7z)")
-        filters.append("RAR文件 (*.rar)")
+        filters.append("支持的压缩文件 (*.zip *.7z *.rar *.z* *.r* *.part*.rar *.7z.*)")
+        filters.append("ZIP文件 (*.zip *.z*)")
+        filters.append("7Z文件 (*.7z *.7z.*)")
+        filters.append("RAR文件 (*.rar *.r* *.part*.rar)")
         filters.append("所有文件 (*.*)")
         return ";;".join(filters)
