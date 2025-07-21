@@ -65,8 +65,30 @@ class ZipHandler(ArchiveHandler):
 class SevenZipHandler(ArchiveHandler):
     """7Z格式处理器"""
 
-    def test_password(self, archive_path: str, password: str) -> bool:
-        """测试7Z文件密码"""
+    def __init__(self):
+        # 7z命令行工具路径
+        self.sevenzip_path = self._find_7zip_executable()
+
+    def _find_7zip_executable(self) -> Optional[str]:
+        """查找7z命令行工具"""
+        import shutil
+        
+        # 常见的7z安装路径
+        common_paths = [
+            r"C:\Program Files\7-Zip\7z.exe",
+            r"C:\Program Files (x86)\7-Zip\7z.exe",
+            "7z.exe",  # 在PATH中
+            "7za.exe"  # 便携版
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path) or shutil.which(path):
+                return path
+        
+        return None
+
+    def _test_password_with_py7zr(self, archive_path: str, password: str) -> bool:
+        """使用py7zr库测试密码"""
         try:
             with py7zr.SevenZipFile(
                 archive_path, mode="r", password=password
@@ -79,8 +101,45 @@ class SevenZipHandler(ArchiveHandler):
         except Exception:
             return False
 
+    def _test_password_with_7z_command(self, archive_path: str, password: str) -> bool:
+        """使用7z命令行工具测试密码"""
+        if not self.sevenzip_path:
+            return False
+        
+        try:
+            import subprocess
+            
+            # 使用7z l命令列出文件来测试密码，这比t命令兼容性更好
+            cmd = [self.sevenzip_path, "l", f"-p{password}", archive_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            # 检查返回码和输出
+            if result.returncode == 0:
+                # 检查输出中是否包含文件列表，这表明密码正确
+                output = result.stdout.lower()
+                if "files" in output and ("date" in output or "name" in output):
+                    return True
+            
+            return False
+            
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, Exception):
+            return False
+
+    def test_password(self, archive_path: str, password: str) -> bool:
+        """测试7Z文件密码"""
+        # 首先尝试使用py7zr库
+        if self._test_password_with_py7zr(archive_path, password):
+            return True
+        
+        # 如果py7zr失败，尝试使用7z命令行工具
+        if self._test_password_with_7z_command(archive_path, password):
+            return True
+        
+        return False
+
     def extract_info(self, archive_path: str) -> dict:
         """获取7Z文件信息"""
+        # 首先尝试使用py7zr库
         try:
             with py7zr.SevenZipFile(archive_path, mode="r") as archive:
                 file_list = archive.list()
@@ -95,8 +154,96 @@ class SevenZipHandler(ArchiveHandler):
                         item.compressed if item.compressed else 0 for item in file_list
                     ),
                 }
-        except Exception as e:
-            return {"error": str(e)}
+        except Exception:
+            # 如果py7zr失败，使用简化的方法获取基本信息
+            try:
+                file_size = os.path.getsize(archive_path)
+                
+                # 对于分卷文件，提供基本信息而不是完整扫描
+                if archive_path.lower().endswith(('.001', '.7z.001')):
+                    return {
+                        "file_count": 1,  # 分卷文件通常至少包含一个文件
+                        "has_password": True,  # 假设有密码保护
+                        "total_size": file_size,
+                        "compressed_size": file_size,
+                        "method": "快速模式 - 分卷文件",
+                        "note": "为避免超时，使用快速检测模式"
+                    }
+                
+                # 对于普通文件，尝试使用7z命令行工具但设置更短的超时
+                if self.sevenzip_path:
+                    try:
+                        import subprocess
+                        import re
+                        
+                        # 使用7z l命令获取信息，但使用更短的超时
+                        cmd = [self.sevenzip_path, "l", archive_path]
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                        
+                        if result.returncode == 0:
+                            output = result.stdout
+                            
+                            # 解析输出获取文件信息
+                            file_count = 1
+                            total_size = file_size
+                            compressed_size = file_size
+                            has_password = False
+                            
+                            lines = output.split('\n')
+                            for line in lines:
+                                # 查找文件数量
+                                files_match = re.search(r'(\d+)\s+files?', line, re.IGNORECASE)
+                                if files_match:
+                                    file_count = int(files_match.group(1))
+                                
+                                # 查找大小信息
+                                size_match = re.search(r'Total archives size:\s*(\d+)', line, re.IGNORECASE)
+                                if size_match:
+                                    compressed_size = int(size_match.group(1))
+                                
+                                # 检查是否有密码保护
+                                if any(keyword in line.lower() for keyword in ["encrypted", "aes", "method"]):
+                                    has_password = True
+                            
+                            return {
+                                "file_count": file_count,
+                                "has_password": has_password,
+                                "total_size": total_size,
+                                "compressed_size": compressed_size,
+                                "method": "7z命令行工具"
+                            }
+                    
+                    except subprocess.TimeoutExpired:
+                        # 如果超时，返回基本文件信息
+                        return {
+                            "file_count": 1,
+                            "has_password": True,
+                            "total_size": file_size,
+                            "compressed_size": file_size,
+                            "method": "快速模式 - 超时保护",
+                            "note": "7z命令超时，使用基本信息"
+                        }
+                    except Exception as e:
+                        return {
+                            "file_count": 1,
+                            "has_password": True,
+                            "total_size": file_size,
+                            "compressed_size": file_size,
+                            "error": f"7z命令行工具错误: {str(e)}",
+                            "method": "降级模式"
+                        }
+                
+                # 如果没有7z工具，返回基本信息
+                return {
+                    "file_count": 1,
+                    "has_password": True,
+                    "total_size": file_size,
+                    "compressed_size": file_size,
+                    "method": "基本文件信息"
+                }
+                
+            except Exception as e:
+                return {"error": f"获取文件信息失败: {str(e)}"}
 
 
 class RarHandler(ArchiveHandler):
