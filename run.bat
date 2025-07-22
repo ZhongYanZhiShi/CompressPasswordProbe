@@ -1,4 +1,5 @@
 @echo off
+chcp 65001
 echo ================================
 echo  CompressPasswordProbe 启动器
 echo ================================
