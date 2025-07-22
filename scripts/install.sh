@@ -45,6 +45,6 @@ echo "安装完成！"
 echo "====================================="
 echo
 echo "使用说明:"
-echo "1. 运行 ./start.sh 启动程序"
+echo "1. 运行 ./setup.sh 启动程序"
 echo "2. 或者在虚拟环境中运行: python main.py"
 echo

@@ -52,6 +52,6 @@ echo 1. 运行 start_conda.bat 启动程序
 echo 2. 环境名称: compress-password-probe
 echo 3. 如需手动激活: conda activate compress-password-probe
 echo.
-echo 注意: 请使用 start_conda.bat 而不是 start.bat 来启动程序
+echo 注意: 请使用 start_conda.bat 而不是 setup.bat 来启动程序
 
 pause

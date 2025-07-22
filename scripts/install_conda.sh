@@ -52,4 +52,4 @@ echo "1. 运行 ./start_conda.sh 启动程序"
 echo "2. 环境名称: compress-password-probe"
 echo "3. 如需手动激活: conda activate compress-password-probe"
 echo
-echo "注意: 请使用 ./start_conda.sh 而不是 ./start.sh 来启动程序"
+echo "注意: 请使用 ./start_conda.sh 而不是 ./setup.sh 来启动程序"
