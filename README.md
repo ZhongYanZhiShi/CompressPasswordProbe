@@ -37,7 +37,32 @@
 
 ## 安装说明
 
-### 方式一：从源码安装
+## 快速开始
+
+### 🚀 一键启动（推荐）
+
+```bash
+# 克隆仓库
+git clone https://github.com/ZhongYanZhiShi/CompressPasswordProbe.git
+cd CompressPasswordProbe
+
+# Windows 用户
+start.bat
+
+# Linux/macOS 用户
+chmod +x start.sh
+./start.sh
+```
+
+**就这么简单！** `start` 脚本会自动：
+- 🔍 检测已配置的环境
+- 🚀 直接启动程序（如果环境已配置）
+- 📦 提供安装向导（如果环境未配置）
+- ⚡ 安装完成后自动启动程序
+
+## 安装说明
+
+### 方式一：从源码安装（推荐）
 
 1. **克隆仓库**
 
@@ -46,16 +71,14 @@ git clone https://github.com/ZhongYanZhiShi/CompressPasswordProbe.git
 cd CompressPasswordProbe
 ```
 
-2. **安装依赖**
+2. **运行启动脚本**
 
 ```bash
-pip install -r requirements.txt
-```
+# Windows
+start.bat
 
-3. **运行程序**
-
-```bash
-python main.py
+# Linux/macOS  
+./start.sh
 ```
 
 ### 方式二：使用可执行文件
@@ -63,6 +86,50 @@ python main.py
 1. 从 [Releases](https://github.com/ZhongYanZhiShi/CompressPasswordProbe/releases) 页面下载对应平台的可执行文件
 2. 解压下载的文件
 3. 直接运行 `CompressPasswordProbe.exe`（Windows）或相应的可执行文件
+
+### 方式三：使用 Conda 环境（推荐）
+
+Conda 环境提供更好的包管理和依赖解析能力，特别适合科学计算和机器学习相关的应用。
+
+#### Windows 用户
+
+```batch
+# 安装 Conda 环境并依赖
+scripts\install_conda.bat
+
+# 启动程序
+scripts\start_conda.bat
+```
+
+#### Linux/macOS 用户
+
+```bash
+# 安装 Conda 环境并依赖
+./scripts/install_conda.sh
+
+# 启动程序
+./scripts/start_conda.sh
+```
+
+#### 手动安装 Conda 环境
+
+如果您更喜欢手动控制安装过程：
+
+```bash
+# 创建 Conda 环境
+conda create -n compress-password-probe python=3.11 -y
+
+# 激活环境
+conda activate compress-password-probe
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 运行程序
+python main.py
+```
+
+**注意**: 详细的 Conda 使用指南请参考 [CONDA_GUIDE.md](CONDA_GUIDE.md)
 
 ## 使用指南
 
@@ -138,8 +205,13 @@ qwerty
 ```
 CompressPasswordProbe/
 ├── main.py                 # 主入口文件
+├── start.bat              # Windows 智能启动脚本
+├── start.sh               # Linux/macOS 智能启动脚本
 ├── requirements.txt        # 依赖列表
 ├── CompressPasswordProbe.spec  # PyInstaller 配置
+├── build.py               # 自定义构建脚本
+├── config.json            # 配置文件
+├── sample_dictionary.txt   # 示例字典文件
 ├── core/                   # 核心模块
 │   ├── __init__.py
 │   ├── config.py          # 配置管理
@@ -150,9 +222,19 @@ CompressPasswordProbe/
 │   └── logger.py          # 日志管理
 ├── gui/                    # 图形界面
 │   ├── __init__.py
-│   ├── main_window.py     # 主窗口
+│   ├── main_window_simple.py # 主窗口
 │   ├── settings_dialog.py # 设置对话框
 │   └── about_dialog.py    # 关于对话框
+├── scripts/                # 安装和启动脚本
+│   ├── README.md          # 脚本使用说明
+│   ├── install.bat        # Windows 虚拟环境安装
+│   ├── install.sh         # Linux/macOS 虚拟环境安装
+│   ├── install_conda.bat  # Windows Conda 环境安装
+│   ├── install_conda.sh   # Linux/macOS Conda 环境安装
+│   ├── start_conda.bat    # Windows Conda 环境启动
+│   └── start_conda.sh     # Linux/macOS Conda 环境启动
+├── lib/                    # 外部工具库
+│   └── 7z/                # 7-Zip 工具
 ├── logs/                   # 日志目录
 └── README.md              # 说明文档
 ```

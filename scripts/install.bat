@@ -1,4 +1,6 @@
 @echo off
+chcp 65001
+
 title CompressPasswordProbe Installer
 
 echo =====================================
