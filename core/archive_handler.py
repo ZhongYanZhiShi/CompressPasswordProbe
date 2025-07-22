@@ -222,6 +222,62 @@ class UnifiedArchiveHandler:
             print(f"单文件解压测试失败，回退到完整测试: {str(e)}")
             return self._test_password_with_full_test(archive_path, password)
 
+    def _test_password_with_preanalyzed_file(
+        self, archive_path: str, password: str, file_info: Dict
+    ) -> bool:
+        """使用预分析的文件信息进行密码测试（多进程优化版本）"""
+        try:
+            import tempfile
+            import shutil
+
+            temp_dir = tempfile.mkdtemp()
+
+            try:
+                # 使用预分析的文件信息
+                target_filename = file_info["name"].replace("\\\\", "\\")
+
+                cmd = [
+                    self.sevenzip_path,
+                    "e",
+                    f"-p{password}",
+                    archive_path,
+                    target_filename,
+                    f"-o{temp_dir}",
+                    "-y",
+                ]
+
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+                error_output = result.stderr
+                stdout_output = result.stdout
+
+                if result.returncode == 0:
+                    if (
+                        "Files: 0" in stdout_output
+                        or "No files to process" in stdout_output
+                    ):
+                        # 文件名匹配失败，但不回退，直接返回失败（避免重复分析）
+                        return False
+                    else:
+                        return True
+                else:
+                    # 密码错误或其他错误
+                    if (
+                        "wrong password" in error_output.lower()
+                        or "wrong password" in stdout_output.lower()
+                        or "ERROR:" in error_output
+                        and "password" in error_output.lower()
+                    ):
+                        return False
+                    else:
+                        return False
+
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        except Exception:
+            return False
+
     def _find_smallest_encrypted_file(self, archive_path: str) -> Optional[Dict]:
         """查找压缩包中最小的文件作为密码测试目标"""
         try:

@@ -4,6 +4,7 @@
 
 import os
 import json
+import multiprocessing as mp
 from typing import Dict, Any, Optional
 
 
@@ -14,6 +15,8 @@ class Config:
         self.config_file = "config.json"
         self.default_config = {
             "gpu_acceleration": False,
+            "use_multiprocess": True,  # 默认启用多进程
+            "max_processes": mp.cpu_count(),  # 多进程数量，默认为CPU核心数
             "max_threads": 4,
             "max_attempts": 0,  # 0表示无限制
             "timeout_seconds": 0,  # 0表示无限制
@@ -21,7 +24,7 @@ class Config:
             "last_archive_path": "",
             "save_log": True,
             "log_directory": "logs",
-            "batch_size": 1000,  # GPU批处理大小
+            "batch_size": 50,  # 多进程批处理大小
         }
         self.config = self.default_config.copy()
         self.load_config()

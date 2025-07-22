@@ -29,6 +29,7 @@ from core.config import Config
 from core.archive_handler import ArchiveManager
 from core.dictionary import DictionaryReader, DictionaryManager
 from core.crack_engine import PasswordCrackEngine
+from core.multiprocess_cracker import MultiprocessPasswordCracker
 from core.gpu_accelerator import GPUManager
 from core.logger import get_logger
 
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self.config = config
         self.archive_manager = ArchiveManager()
         self.crack_engine = PasswordCrackEngine(config.config)
+        self.multiprocess_cracker = None  # 延迟初始化
         self.gpu_manager = GPUManager()
         self.logger = get_logger()
 
@@ -156,12 +158,21 @@ class MainWindow(QMainWindow):
         group = QGroupBox("控制选项")
         layout = QGridLayout(group)
 
+        # 多进程选项
+        self.multiprocess_checkbox = QCheckBox("启用多进程加速")
+        self.multiprocess_checkbox.setChecked(self.config.get("use_multiprocess", True))
+        self.process_count_label = QLabel(
+            f"进程数: {self.config.get('max_processes', 4)}"
+        )
+        layout.addWidget(self.multiprocess_checkbox, 0, 0)
+        layout.addWidget(self.process_count_label, 0, 1)
+
         # GPU加速选项
         self.gpu_checkbox = QCheckBox("启用GPU加速")
         self.gpu_checkbox.setChecked(self.config.get("gpu_acceleration", False))
         self.gpu_status_label = QLabel("GPU状态: 检测中...")
-        layout.addWidget(self.gpu_checkbox, 0, 0)
-        layout.addWidget(self.gpu_status_label, 0, 1)
+        layout.addWidget(self.gpu_checkbox, 1, 0)
+        layout.addWidget(self.gpu_status_label, 1, 1)
 
         # 控制按钮
         button_layout = QHBoxLayout()
@@ -181,7 +192,7 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(self.stop_btn)
         button_layout.addStretch()
 
-        layout.addLayout(button_layout, 1, 0, 1, 2)
+        layout.addLayout(button_layout, 2, 0, 1, 2)
 
         return group
 
@@ -247,6 +258,9 @@ class MainWindow(QMainWindow):
         self.crack_engine.crack_finished.connect(self.on_crack_finished)
         self.crack_engine.speed_updated.connect(self.update_speed)
 
+        self.multiprocess_checkbox.stateChanged.connect(
+            self.on_multiprocess_setting_changed
+        )
         self.gpu_checkbox.stateChanged.connect(self.on_gpu_setting_changed)
 
         self.timer = QTimer()
@@ -358,12 +372,19 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", "请先选择字典文件")
             return
 
+        # 保存配置
+        self.config.set("use_multiprocess", self.multiprocess_checkbox.isChecked())
         self.config.set("gpu_acceleration", self.gpu_checkbox.isChecked())
         self.config.save_config()
 
-        if self.crack_engine.start_crack(
-            self.current_archive_path, self.current_dictionary_path
-        ):
+        # 根据选择使用不同的破解引擎
+        success = False
+        if self.multiprocess_checkbox.isChecked():
+            success = self._start_multiprocess_crack()
+        else:
+            success = self._start_single_process_crack()
+
+        if success:
             self.start_btn.setEnabled(False)
             self.pause_btn.setEnabled(True)
             self.stop_btn.setEnabled(True)
@@ -378,9 +399,63 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "错误", "启动破解失败")
 
+    def _start_multiprocess_crack(self) -> bool:
+        """启动多进程破解"""
+        try:
+            # 创建多进程破解器
+            config_dict = {
+                "max_processes": self.config.get("max_processes", 4),
+                "batch_size": self.config.get("batch_size", 50),
+                "max_attempts": self.config.get("max_attempts", 0),
+            }
+
+            self.multiprocess_cracker = MultiprocessPasswordCracker(
+                self.current_archive_path, self.current_dictionary_path, config_dict
+            )
+
+            # 连接信号
+            self.multiprocess_cracker.progress_updated.connect(
+                self._on_multiprocess_progress
+            )
+            self.multiprocess_cracker.password_found.connect(
+                self._on_multiprocess_password_found
+            )
+            self.multiprocess_cracker.crack_finished.connect(
+                self._on_multiprocess_finished
+            )
+
+            # 启动破解
+            self.multiprocess_cracker.start_cracking()
+
+            self.log_message(
+                f"使用多进程模式启动破解 (进程数: {config_dict['max_processes']})"
+            )
+            return True
+
+        except Exception as e:
+            self.log_message(f"多进程破解启动失败: {str(e)}")
+            return False
+
+    def _start_single_process_crack(self) -> bool:
+        """启动单进程破解"""
+        return self.crack_engine.start_crack(
+            self.current_archive_path, self.current_dictionary_path
+        )
+
     def pause_crack(self):
         """暂停破解"""
-        if self.crack_engine.is_running():
+        if self.multiprocess_cracker and self.multiprocess_cracker.is_running:
+            if self.multiprocess_cracker.is_paused:
+                self.multiprocess_cracker.resume_cracking()
+                self.pause_btn.setText("暂停")
+                self.timer.start(1000)
+                self.log_message("恢复多进程密码破解")
+            else:
+                self.multiprocess_cracker.pause_cracking()
+                self.pause_btn.setText("恢复")
+                self.timer.stop()
+                self.log_message("暂停多进程密码破解")
+        elif self.crack_engine.is_running():
             if self.crack_engine.is_paused():
                 self.crack_engine.resume_crack()
                 self.pause_btn.setText("暂停")
@@ -394,9 +469,14 @@ class MainWindow(QMainWindow):
 
     def stop_crack(self):
         """停止破解"""
-        self.crack_engine.stop_crack()
+        if self.multiprocess_cracker and self.multiprocess_cracker.is_running:
+            self.multiprocess_cracker.stop_cracking()
+            self.log_message("停止多进程密码破解")
+        else:
+            self.crack_engine.stop_crack()
+            self.log_message("停止密码破解")
+
         self.reset_ui_state()
-        self.log_message("停止密码破解")
 
     def reset_ui_state(self):
         """重置UI状态"""
@@ -501,9 +581,83 @@ class MainWindow(QMainWindow):
         elif not success:
             self.log_message("破解完成，未找到正确的密码")
 
+    def on_multiprocess_setting_changed(self, state: int):
+        """多进程设置变化"""
+        self.config.set("use_multiprocess", state == Qt.Checked)
+
     def on_gpu_setting_changed(self, state: int):
         """GPU设置变化"""
         self.config.set("gpu_acceleration", state == Qt.Checked)
+
+    def _on_multiprocess_progress(
+        self, current: int, total: int, password: str, speed: float
+    ):
+        """多进程进度更新"""
+        self.progress_bar.setMaximum(total if total > 0 else current)
+        self.progress_bar.setValue(current)
+        self.current_password_label.setText(password)
+        self.progress_label.setText(
+            f"{current:,} / {total:,}" if total > 0 else f"{current:,}"
+        )
+        self.speed_label.setText(f"{speed:.1f} passwords/sec")
+
+    def _on_multiprocess_password_found(
+        self, password: str, attempts: int, elapsed_time: float
+    ):
+        """多进程找到密码"""
+        # 设置UI
+        self.found_password_edit.setText(password)
+        self.copy_password_btn.setEnabled(True)
+
+        # 记录日志
+        self.log_message(f"密码破解成功！找到密码: {password}")
+        self.log_message(f"总共尝试: {attempts:,} 个密码，耗时: {elapsed_time:.2f} 秒")
+
+        # 显示成功消息框（与单线程版本保持一致）
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("破解成功")
+        msg_box.setText(
+            f"找到密码: {password}\n\n"
+            f"尝试次数: {attempts:,}\n"
+            f"耗时: {elapsed_time:.2f} 秒"
+        )
+        msg_box.setIcon(QMessageBox.Information)
+
+        # 添加复制按钮
+        copy_button = msg_box.addButton("复制密码", QMessageBox.ActionRole)
+        ok_button = msg_box.addButton(QMessageBox.Ok)
+
+        msg_box.exec()
+
+        # 检查用户点击的按钮
+        if msg_box.clickedButton() == copy_button:
+            self.copy_password_to_clipboard(password)
+
+    def _on_multiprocess_finished(self, success: bool, message: str, stats: dict):
+        """多进程破解完成"""
+        self.reset_ui_state()
+        self.timer.stop()
+        self.statusBar().showMessage("就绪")
+
+        if success:
+            self.log_message("多进程密码破解成功！")
+            # 显示统计信息
+            if stats:
+                speed = stats.get("average_speed", 0)
+                processes = stats.get("processes_used", 0)
+                self.log_message(
+                    f"统计信息: 平均速度 {speed:.1f} passwords/sec, 使用 {processes} 个进程"
+                )
+        else:
+            self.log_message(f"多进程密码破解完成: {message}")
+            # 显示尝试统计
+            if stats:
+                attempts = stats.get("total_attempts", 0)
+                elapsed = stats.get("elapsed_time", 0)
+                if attempts > 0:
+                    self.log_message(
+                        f"总计尝试: {attempts:,} 个密码，耗时: {elapsed:.2f} 秒"
+                    )
 
     def check_gpu_status(self):
         """检查GPU状态"""
