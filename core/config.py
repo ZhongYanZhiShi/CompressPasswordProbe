@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 
 
 class Config:
-    """应用程序配置管理类"""
+    """应用程序配置管理类 - 简化版"""
 
     def __init__(self):
         self.config_file = "config.json"
@@ -21,12 +21,19 @@ class Config:
             "last_archive_path": "",
             "save_log": True,
             "log_directory": "logs",
-            "ui_language": "zh_CN",
             "batch_size": 1000,  # GPU批处理大小
-            "auto_detect_gpu": True,
         }
         self.config = self.default_config.copy()
         self.load_config()
+    
+    # 支持字典式访问
+    def __getitem__(self, key: str) -> Any:
+        """支持 config['key'] 语法"""
+        return self.config.get(key)
+    
+    def __setitem__(self, key: str, value: Any) -> None:
+        """支持 config['key'] = value 语法"""
+        self.config[key] = value
 
     def load_config(self) -> None:
         """加载配置文件"""
